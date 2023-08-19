@@ -5,11 +5,13 @@
 
 -export([random_puzzle/1, random_solution/1, parallel_random_puzzle/3, print/1]).
 
--type puzzle_grid() :: #{{1..9, 1..9} => 0..9}.
--type work_grid() :: #{{1..9, 1..9} => [1..9]}.
+-type index() :: {1..9, 1..9}.
+-type value() :: 1..9.
+-type puzzle_grid() :: #{index() => 0 | value()}.
+-type work_grid() :: #{index() => [value()]}.
 -type random_generator() :: fun((N :: pos_integer()) -> X :: pos_integer()).
 
--export_type([puzzle_grid/0]).
+-export_type([puzzle_grid/0, index/0, value/0, random_generator/0]).
 
 -spec parallel_random_puzzle(random_generator(), pos_integer(), timeout()) -> puzzle_grid().
 parallel_random_puzzle(RandomGenerator, MaxHint, Timeout) ->
@@ -81,12 +83,17 @@ remove_values_until_multiple_solutions(Solution, [Cell | Tail], AccHintCells) ->
             remove_values_until_multiple_solutions(Solution, Tail, [Cell | AccHintCells])
     end.
 
+-spec empty_work_grid() -> work_grid().
+empty_work_grid() ->
+    AllValues = lists:seq(1, 9),
+    maps:from_list([{{X, Y}, AllValues} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]).
+
 -spec random_solution(random_generator()) -> work_grid().
 random_solution(RandomGenerator) ->
-    AllValues = lists:seq(1, 9),
-    EmptyGrid = maps:from_list([{{X, Y}, AllValues} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]),
+    EmptyGrid = empty_work_grid(),
     fill_random_grid(RandomGenerator, EmptyGrid).
 
+-spec fill_random_grid(random_generator(), work_grid()) -> work_grid().
 fill_random_grid(RandomGenerator, EmptyGrid) ->
     RandomValues = random_values(RandomGenerator, 17),
     CandidateGrid = fill_cells(RandomGenerator, EmptyGrid, RandomValues),
@@ -95,6 +102,7 @@ fill_random_grid(RandomGenerator, EmptyGrid) ->
         none -> fill_random_grid(RandomGenerator, EmptyGrid)
     end.
 
+-spec random_values(RandomGenerator :: random_generator(), Count :: pos_integer()) -> [value()].
 random_values(RandomGenerator, Count) ->
     RandomValues = [RandomGenerator(9) || _ <- lists:seq(1, Count)],
     % We need at least 8 different values
@@ -103,6 +111,8 @@ random_values(RandomGenerator, Count) ->
         false -> RandomValues
     end.
 
+%% Randomly add values in a grid, ensuring the grid is still valid.
+-spec fill_cells(RandomGenerator :: random_generator(), Grid :: work_grid(), [value()]) -> work_grid().
 fill_cells(_RandomGenerator, Grid, []) -> Grid;
 fill_cells(RandomGenerator, Grid, [Value | Tail]) ->
     RandomCellX = RandomGenerator(9),
@@ -120,10 +130,39 @@ fill_cells(RandomGenerator, Grid, [Value | Tail]) ->
             end
     end.
 
+-spec set_grid_value_and_propagate(Grid :: work_grid(), Index :: index(), Value :: value()) -> work_grid() | invalid.
 set_grid_value_and_propagate(Grid0, {X, Y}, Value) ->
-    set_grid_value_and_propagate(Grid0, [{{X, Y}, Value}]).
+    set_grid_values_and_propagate(Grid0, [{{X, Y}, Value}]).
 
-set_grid_value_and_propagate_update_cell(CellX, CellY, CellValues, Value, AccGrid, AccList) ->
+-spec set_grid_values_and_propagate(Grid :: work_grid(), Updates :: [{Index :: index(), Value :: value()}]) -> work_grid() | invalid.
+set_grid_values_and_propagate(Grid0, [{{X, Y}, Value} | Tail]) ->
+    Result = lists:foldl(fun({CellX, CellY}, Acc) ->
+        CellValues = maps:get({CellX, CellY}, Grid0),
+        case Acc of
+            invalid -> invalid;
+            {AccGrid, AccList} ->
+                if
+                    CellX =:= X andalso CellY =:= Y -> {maps:update({X, Y}, [Value], AccGrid), AccList};
+                    CellX =:= X ->
+                        set_grid_value_and_propagate_update_cell({CellX, CellY}, CellValues, Value, AccGrid, AccList);
+                    CellY =:= Y ->
+                        set_grid_value_and_propagate_update_cell({CellX, CellY}, CellValues, Value, AccGrid, AccList);
+                    (CellX - 1) div 3 =:= (X - 1) div 3 andalso (CellY - 1) div 3 =:= (Y - 1) div 3 ->
+                        set_grid_value_and_propagate_update_cell({CellX, CellY}, CellValues, Value, AccGrid, AccList);
+                    true ->
+                        {AccGrid, AccList}
+                end
+        end
+    end, {Grid0, Tail}, [{IX, IY} || IX <- lists:seq(1, 9), IY <- lists:seq(1, 9)]), % deterministic, as opposed to maps:fold
+    case Result of
+        invalid -> invalid;
+        {NewGrid, []} -> NewGrid;
+        {NewGrid, NewList} ->
+            set_grid_values_and_propagate(NewGrid, NewList)
+    end.
+
+-spec set_grid_value_and_propagate_update_cell(index(), [value()], value(), work_grid(), Updates :: [{Index :: index(), Value :: value()}]) -> {NewGrid :: work_grid(), NewUpdates :: [{Index :: index(), Value :: value()}]}.
+set_grid_value_and_propagate_update_cell({CellX, CellY}, CellValues, Value, AccGrid, AccList) ->
     case lists:member(Value, CellValues) of
         true ->
             NewCellValues = lists:delete(Value, CellValues),
@@ -138,32 +177,7 @@ set_grid_value_and_propagate_update_cell(CellX, CellY, CellValues, Value, AccGri
             {AccGrid, AccList}
     end.
 
-set_grid_value_and_propagate(Grid0, [{{X, Y}, Value} | Tail]) ->
-    Result = lists:foldl(fun({CellX, CellY}, Acc) ->
-        CellValues = maps:get({CellX, CellY}, Grid0),
-        case Acc of
-            invalid -> invalid;
-            {AccGrid, AccList} ->
-                if
-                    CellX =:= X andalso CellY =:= Y -> {maps:update({X, Y}, [Value], AccGrid), AccList};
-                    CellX =:= X ->
-                        set_grid_value_and_propagate_update_cell(CellX, CellY, CellValues, Value, AccGrid, AccList);
-                    CellY =:= Y ->
-                        set_grid_value_and_propagate_update_cell(CellX, CellY, CellValues, Value, AccGrid, AccList);
-                    (CellX - 1) div 3 =:= (X - 1) div 3 andalso (CellY - 1) div 3 =:= (Y - 1) div 3 ->
-                        set_grid_value_and_propagate_update_cell(CellX, CellY, CellValues, Value, AccGrid, AccList);
-                    true ->
-                        {AccGrid, AccList}
-                end
-        end
-    end, {Grid0, Tail}, [{IX, IY} || IX <- lists:seq(1, 9), IY <- lists:seq(1, 9)]), % deterministic, as opposed to maps:fold
-    case Result of
-        invalid -> invalid;
-        {NewGrid, []} -> NewGrid;
-        {NewGrid, NewList} ->
-            set_grid_value_and_propagate(NewGrid, NewList)
-    end.
-
+-spec hints_to_puzzle_grid(Grid :: work_grid(), HintCells :: [index()]) -> puzzle_grid().
 hints_to_puzzle_grid(Grid, HintCells) ->
     EmptyGrid = maps:from_list([{{X, Y}, 0} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]),
     lists:foldl(fun(Index, Map) ->
@@ -171,49 +185,60 @@ hints_to_puzzle_grid(Grid, HintCells) ->
         maps:put(Index, Value, Map)
     end, EmptyGrid, HintCells).
 
+-spec remove_cells_and_propagate(Grid :: work_grid(), HintCells :: [index()]) -> work_grid().
 remove_cells_and_propagate(Grid, HintCells) ->
-    AllValues = lists:seq(1, 9),
-    EmptyGrid = maps:from_list([{{X, Y}, AllValues} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]),
+    EmptyGrid = empty_work_grid(),
     lists:foldl(fun(Index, Map) ->
         [Value] = maps:get(Index, Grid),
         set_grid_value_and_propagate(Map, Index, Value)
     end, EmptyGrid, HintCells).
 
+-spec find_a_solution(Grid :: work_grid()) -> {value, work_grid()} | none.
 find_a_solution(Grid) ->
-    find_another_solution(Grid, undefined).
+    case find_solutions(Grid, 1, []) of
+        {value, [Solution]} -> {value, Solution};
+        {incomplete, []} -> none
+    end.
 
+-spec has_a_unique_solution(Grid :: work_grid()) -> boolean().
 has_a_unique_solution(Grid) ->
-    case find_another_solution(Grid, undefined) of
-        {value, Solution} ->
-            case find_another_solution(Grid, Solution) of
-                none -> true;
-                {value, _} -> false
-            end;
-        none -> false
+    case find_solutions(Grid, 2, []) of
+        {value, [_Solution1, _Solution2]} -> false;
+        {incomplete, [_Solution]} -> true;
+        {incomplete, []} -> false
     end.
 
-find_another_solution(Grid, Solution) ->
-    case test_grid(Grid) of
-        complete when Grid =/= Solution -> {value, Grid};
-        complete when Grid =:= Solution -> none;
+-spec find_solutions(Grid :: work_grid(), Count :: pos_integer(), AccSolution :: [work_grid()]) -> {value, [work_grid()]} | {incomplete, [work_grid()]}.
+find_solutions(Grid, Count, AccSolutions) ->
+    case get_undecided_cell(Grid) of
+        complete when length(AccSolutions) + 1 =:= Count ->
+            {value, [Grid | AccSolutions]};
+        complete ->
+            {incomplete, [Grid | AccSolutions]};
         {incomplete, {X, Y}, Values} ->
-            test_solutions(Grid, {X, Y}, Values, Solution)
+            test_solution(Grid, {X, Y}, Values, Count, AccSolutions)
     end.
 
-test_solutions(_Grid, {_X, _Y}, [], _Solution) -> none;
-test_solutions(Grid, {X, Y}, [Value | Tail], Solution) ->
+%% @doc Recursively (depth-first) test values for a given cell.
+-spec test_solution(Grid :: work_grid(), Cell :: index(), Values :: [value()], Count :: pos_integer(), AccSolutions :: [work_grid()]) -> {value, [work_grid()]} | {incomplete, [work_grid()]}.
+test_solution(_Grid, {_X, _Y}, [], _Count, AccSolutions) -> {incomplete, AccSolutions};
+test_solution(Grid, {X, Y}, [Value | Tail], Count, AccSolutions) ->
     Grid1 = set_grid_value_and_propagate(Grid, {X, Y}, Value),
     case Grid1 of
         invalid ->
-            test_solutions(Grid, {X, Y}, Tail, Solution);
+            test_solution(Grid, {X, Y}, Tail, Count, AccSolutions);
         _ ->
-            case find_another_solution(Grid1, Solution) of
-                {value, OtherSolution} -> {value, OtherSolution};
-                none -> test_solutions(Grid, {X, Y}, Tail, Solution)
+            case find_solutions(Grid1, Count, AccSolutions) of
+                {value, AllSolutions} ->
+                    {value, AllSolutions};
+                {incomplete, NewAccSolutions} ->
+                    test_solution(Grid, {X, Y}, Tail, Count, NewAccSolutions)
             end
     end.
 
-test_grid(Grid) ->
+%% @doc Pick up a cell which is still undecided
+-spec get_undecided_cell(Grid :: work_grid()) -> complete | {incomplete, index(), [value()]}.
+get_undecided_cell(Grid) ->
     lists:foldl(fun({X, Y}, Acc) ->
         case {maps:get({X, Y}, Grid), Acc} of
             {[_V1, _V2 | _] = List, complete} -> {incomplete, {X, Y}, List};
