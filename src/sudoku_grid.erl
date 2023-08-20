@@ -3,21 +3,46 @@
 
 -module(sudoku_grid).
 
--export([random_puzzle/1, random_solution/1, parallel_random_puzzle/3, print/1]).
+-export([random_puzzle/1, random_solution/1, parallel_random_puzzle/3, print/1, get/3, to_list/1]).
 
 -type index() :: {1..9, 1..9}.
 -type value() :: 1..9.
 -type puzzle_grid() :: #{index() => 0 | value()}.
--type work_grid() :: #{index() => [value()]}.
+-type work_grid() :: tuple().
 -type random_generator() :: fun((N :: pos_integer()) -> X :: pos_integer()).
 
 -export_type([puzzle_grid/0, index/0, value/0, random_generator/0]).
+
+-spec get(X :: 1..9, Y :: 1..9, Grid :: puzzle_grid()) -> 0 | value();
+         (X :: 1..9, Y :: 1..9, Grid :: work_grid()) -> [value()].
+get(X, Y, Grid) when is_map(Grid) ->
+    maps:get({X, Y}, Grid);
+get(X, Y, Grid) when is_tuple(Grid) ->
+    element((X - 1) * 9 + Y, Grid).
+
+-spec put(X :: 1..9, Y :: 1..9, Value :: 0 | value(), Grid :: puzzle_grid()) -> puzzle_grid();
+         (X :: 1..9, Y :: 1..9, Value :: [value()], Grid :: work_grid()) -> work_grid().
+put(X, Y, Value, Grid) when is_map(Grid) ->
+    maps:put({X, Y}, Value, Grid);
+put(X, Y, Value, Grid) when is_tuple(Grid) ->
+    setelement((X - 1) * 9 + Y, Grid, Value).
+
+-spec to_list(Grid :: puzzle_grid()) -> [{index(), 0 | value()}];
+             (Grid :: work_grid()) -> [{index(), [value()]}].
+to_list(Grid) when is_map(Grid) ->
+    maps:to_list(Grid);
+to_list(Grid) when is_tuple(Grid) ->
+    [{{X, Y}, get(X, Y, Grid)} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)].
 
 -spec parallel_random_puzzle(random_generator(), pos_integer(), timeout()) -> puzzle_grid().
 parallel_random_puzzle(RandomGenerator, MaxHint, Timeout) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),
-    Workers = [spawn_opt(fun() -> parallel_random_puzzle_worker_loop(RandomGenerator, Parent, infinity) end, [monitor]) || _ <- lists:seq(1, erlang:system_info(schedulers_online))],
+    SpawnOpts = case erlang:system_info(machine) of
+        "BEAM" -> [];
+        "ATOM" -> [{heap_growth, fibonacci}]
+    end,
+    Workers = [spawn_opt(fun() -> parallel_random_puzzle_worker_loop(RandomGenerator, Parent, infinity) end, [monitor | SpawnOpts]) || _ <- lists:seq(1, erlang:system_info(schedulers_online))],
     parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, infinity, undefined).
 
 parallel_random_puzzle_worker_loop(RandomGenerator, Parent, BestCandidate) ->
@@ -31,9 +56,10 @@ parallel_random_puzzle_worker_loop(RandomGenerator, Parent, BestCandidate) ->
     end.
 
 parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, BestPuzzleHints, BestPuzzleGrid) ->
-    Wait = case Timeout of
-        infinity -> infinity;
-        _ -> Timeout + Start - erlang:system_time(millisecond)
+    Wait = case {Timeout, BestPuzzleGrid} of
+        {infinity, _} -> infinity;
+        {_, undefined} -> infinity;
+        _ -> max(0, Timeout + Start - erlang:system_time(millisecond))
     end,
     receive
         {_Worker, Hints, Puzzle} ->
@@ -47,7 +73,7 @@ parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, BestPuzzleHints, B
                     parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, BestPuzzleHints, BestPuzzleGrid)
             end
     after Wait ->
-        [exit(Worker, kill) || Worker <- Workers],
+        stop_workers(Workers),
         BestPuzzleGrid
     end.
 
@@ -64,7 +90,7 @@ flush_solutions(Worker) ->
 -spec random_puzzle(random_generator()) -> {pos_integer(), puzzle_grid()}.
 random_puzzle(RandomGenerator) ->
     Grid = random_solution(RandomGenerator),
-    AllCells = lists:sort(maps:keys(Grid)), % make result deterministic
+    AllCells = [{X, Y} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)],
     ShuffledCells = shuffle(RandomGenerator, AllCells),
     remove_values_until_multiple_solutions(Grid, ShuffledCells, []).
 
@@ -86,7 +112,7 @@ remove_values_until_multiple_solutions(Solution, [Cell | Tail], AccHintCells) ->
 -spec empty_work_grid() -> work_grid().
 empty_work_grid() ->
     AllValues = lists:seq(1, 9),
-    maps:from_list([{{X, Y}, AllValues} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]).
+    list_to_tuple(lists:duplicate(81, AllValues)).
 
 -spec random_solution(random_generator()) -> work_grid().
 random_solution(RandomGenerator) ->
@@ -117,7 +143,7 @@ fill_cells(_RandomGenerator, Grid, []) -> Grid;
 fill_cells(RandomGenerator, Grid, [Value | Tail]) ->
     RandomCellX = RandomGenerator(9),
     RandomCellY = RandomGenerator(9),
-    case maps:get({RandomCellX, RandomCellY}, Grid) of
+    case get(RandomCellX, RandomCellY, Grid) of
         [SingleValue] when SingleValue =/= Value ->
             fill_cells(RandomGenerator, Grid, [Value | Tail]);
         _ ->
@@ -137,12 +163,12 @@ set_grid_value_and_propagate(Grid0, {X, Y}, Value) ->
 -spec set_grid_values_and_propagate(Grid :: work_grid(), Updates :: [{Index :: index(), Value :: value()}]) -> work_grid() | invalid.
 set_grid_values_and_propagate(Grid0, [{{X, Y}, Value} | Tail]) ->
     Result = lists:foldl(fun({CellX, CellY}, Acc) ->
-        CellValues = maps:get({CellX, CellY}, Grid0),
+        CellValues = get(CellX, CellY, Grid0),
         case Acc of
             invalid -> invalid;
             {AccGrid, AccList} ->
                 if
-                    CellX =:= X andalso CellY =:= Y -> {maps:update({X, Y}, [Value], AccGrid), AccList};
+                    CellX =:= X andalso CellY =:= Y -> {put(X, Y, [Value], AccGrid), AccList};
                     CellX =:= X ->
                         set_grid_value_and_propagate_update_cell({CellX, CellY}, CellValues, Value, AccGrid, AccList);
                     CellY =:= Y ->
@@ -171,7 +197,7 @@ set_grid_value_and_propagate_update_cell({CellX, CellY}, CellValues, Value, AccG
                 [SingleValue] ->
                     {AccGrid, [{{CellX, CellY}, SingleValue} | AccList]};
                 _ ->
-                    {maps:update({CellX, CellY}, NewCellValues, AccGrid), AccList}
+                    {put(CellX, CellY, NewCellValues, AccGrid), AccList}
             end;
         false ->
             {AccGrid, AccList}
@@ -180,16 +206,16 @@ set_grid_value_and_propagate_update_cell({CellX, CellY}, CellValues, Value, AccG
 -spec hints_to_puzzle_grid(Grid :: work_grid(), HintCells :: [index()]) -> puzzle_grid().
 hints_to_puzzle_grid(Grid, HintCells) ->
     EmptyGrid = maps:from_list([{{X, Y}, 0} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]),
-    lists:foldl(fun(Index, Map) ->
-        [Value] = maps:get(Index, Grid),
+    lists:foldl(fun({IndexX, IndexY} = Index, Map) ->
+        [Value] = get(IndexX, IndexY, Grid),
         maps:put(Index, Value, Map)
     end, EmptyGrid, HintCells).
 
 -spec remove_cells_and_propagate(Grid :: work_grid(), HintCells :: [index()]) -> work_grid().
 remove_cells_and_propagate(Grid, HintCells) ->
     EmptyGrid = empty_work_grid(),
-    lists:foldl(fun(Index, Map) ->
-        [Value] = maps:get(Index, Grid),
+    lists:foldl(fun({IndexX, IndexY} = Index, Map) ->
+        [Value] = get(IndexX, IndexY, Grid),
         set_grid_value_and_propagate(Map, Index, Value)
     end, EmptyGrid, HintCells).
 
@@ -240,7 +266,7 @@ test_solution(Grid, {X, Y}, [Value | Tail], Count, AccSolutions) ->
 -spec get_undecided_cell(Grid :: work_grid()) -> complete | {incomplete, index(), [value()]}.
 get_undecided_cell(Grid) ->
     lists:foldl(fun({X, Y}, Acc) ->
-        case {maps:get({X, Y}, Grid), Acc} of
+        case {get(X, Y, Grid), Acc} of
             {[_V1, _V2 | _] = List, complete} -> {incomplete, {X, Y}, List};
             {[_V1, _V2 | _] = List, {incomplete, {_OtherX, _OtherY}, OtherList}} when length(List) < length(OtherList) -> {incomplete, {X, Y}, List};
             {_, Acc} -> Acc
@@ -251,7 +277,7 @@ get_undecided_cell(Grid) ->
 print(Grid) ->
     lists:foreach(fun(X) ->
         lists:foreach(fun(Y) ->
-            Val = maps:get({X, Y}, Grid),
+            Val = get(X, Y, Grid),
             case Val of
                 0 -> io:format(" ");
                 [SingleVal] when is_integer(SingleVal) -> io:format("~B", [SingleVal]);

@@ -26,7 +26,7 @@ create_puzzle_test_() ->
         ?_test(begin
             {Hints, Puzzle} = sudoku_grid:random_puzzle(fun random_generator/1),
             ?assert(Hints < 54),
-            ?assertEqual(81, maps:size(Puzzle)),
+            ?assertEqual(81, length(sudoku_grid:to_list(Puzzle))),
             ?assertEqual(Hints, count_hints(Puzzle)),
             ok
         end)
@@ -37,24 +37,24 @@ create_proper_puzzle_test_() ->
         10,
         ?_test(begin
             Puzzle = sudoku_grid:parallel_random_puzzle(fun random_generator/1, 25, 5000),
-            ?assertEqual(81, maps:size(Puzzle)),
+            ?assertEqual(81, length(sudoku_grid:to_list(Puzzle))),
             ?assert(count_hints(Puzzle) =< 25),
             ok
         end)
     }.
 
 assert_solution_is_valid(Solution) ->
-    ?assertEqual(81, maps:size(Solution)),
-    [?assertEqual(1, length(maps:get({X, Y}, Solution))) || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)],
-    [?assertEqual(lists:seq(1, 9), lists:sort([hd(maps:get({X, Y}, Solution)) || X <- lists:seq(1, 9)])) || Y <- lists:seq(1, 9)],
-    [?assertEqual(lists:seq(1, 9), lists:sort([hd(maps:get({X, Y}, Solution)) || Y <- lists:seq(1, 9)])) || X <- lists:seq(1, 9)],
-    [?assertEqual(lists:seq(1, 9), lists:sort([hd(maps:get({X, Y}, Solution)) || X <- lists:seq(SX * 3 + 1, SX * 3 + 3), Y <- lists:seq(SY * 3 + 1, SY * 3 + 3)])) || SY <- lists:seq(0, 2), SX <- lists:seq(0, 2)],
+    ?assertEqual(81, length(sudoku_grid:to_list(Solution))),
+    [?assertEqual(1, length(sudoku_grid:get(X, Y, Solution))) || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)],
+    [?assertEqual(lists:seq(1, 9), lists:sort([hd(sudoku_grid:get(X, Y, Solution)) || X <- lists:seq(1, 9)])) || Y <- lists:seq(1, 9)],
+    [?assertEqual(lists:seq(1, 9), lists:sort([hd(sudoku_grid:get(X, Y, Solution)) || Y <- lists:seq(1, 9)])) || X <- lists:seq(1, 9)],
+    [?assertEqual(lists:seq(1, 9), lists:sort([hd(sudoku_grid:get(X, Y, Solution)) || X <- lists:seq(SX * 3 + 1, SX * 3 + 3), Y <- lists:seq(SY * 3 + 1, SY * 3 + 3)])) || SY <- lists:seq(0, 2), SX <- lists:seq(0, 2)],
     ok.
 
 count_hints(Puzzle) ->
-    maps:fold(fun({_X, _Y}, V, Acc) ->
+    lists:foldl(fun({{_X, _Y}, V}, Acc) ->
         case V of
             0 -> Acc;
             _ -> Acc + 1
         end
-    end, 0, Puzzle).
+    end, 0, sudoku_grid:to_list(Puzzle)).
