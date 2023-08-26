@@ -52,3 +52,11 @@ create_element_script_child_test() ->
         <<"const e1=document.createElement(\"p\");e1.append(\"Hello \");const e2=document.createElement(\"span\");e2.append(\"world\");e1.append(e2);e1.append(\".\");">>,
         iolist_to_binary(CreateScript)
     ).
+
+replace_children_script_test() ->
+    {ReplaceScript, NextID} = dom:replace_children_script(<<"#counter">>, integer_to_binary(42), 1),
+    ?assertEqual(1, NextID),
+    ?assertEqual(
+        <<"document.querySelector(\"#counter\").replaceChildren(\"42\");">>,
+        iolist_to_binary(ReplaceScript)
+    ).

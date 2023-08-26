@@ -3,10 +3,56 @@
 
 -module(dom).
 
--export([create_element_script/2]).
+-export([
+    append_child_script/3, replace_children_script/3, replace_with_script/3, create_element_script/2
+]).
 
 -include("dom.hrl").
 
+%% @doc Generate a script to call appendChild method on an element with another
+%% element
+-spec append_child_script(iodata(), dom_element() | iodata(), pos_integer()) ->
+    {iodata(), pos_integer()}.
+append_child_script(QuerySelector, Element, ElementVarID) ->
+    element_method(QuerySelector, <<"appendChild">>, Element, ElementVarID).
+
+%% @doc Generate a script to call replaceChildren method on an element with
+%% another element
+-spec replace_children_script(iodata(), dom_element() | iodata(), pos_integer()) ->
+    {iodata(), pos_integer()}.
+replace_children_script(QuerySelector, Element, ElementVarID) ->
+    element_method(QuerySelector, <<"replaceChildren">>, Element, ElementVarID).
+
+%% @doc Generate a script to call replaceWith method on an element with
+%% another element
+-spec replace_with_script(iodata(), dom_element() | iodata(), pos_integer()) ->
+    {iodata(), pos_integer()}.
+replace_with_script(QuerySelector, Element, ElementVarID) ->
+    element_method(QuerySelector, <<"replaceWith">>, Element, ElementVarID).
+
+element_method(QuerySelector, Method, Element, ElementVarID) ->
+    case is_tuple(Element) of
+        true ->
+            {CreateElementScript, NewElementVarID} = create_element_script(Element, ElementVarID),
+            Parameter = [<<"e">>, integer_to_list(ElementVarID)];
+        false ->
+            CreateElementScript = [],
+            NewElementVarID = ElementVarID,
+            Parameter = [<<"\"">>, escape(Element), <<"\"">>]
+    end,
+    AppendScript = [
+        CreateElementScript,
+        <<"document.querySelector(\"">>,
+        escape(QuerySelector),
+        <<"\").">>,
+        Method,
+        <<"(">>,
+        Parameter,
+        <<");">>
+    ],
+    {AppendScript, NewElementVarID}.
+
+%% @doc Generate a script to call createElement method with an element
 -spec create_element_script(dom_element(), pos_integer()) -> {iodata(), pos_integer()}.
 create_element_script(
     #element{name = ElementName, attributes = Attributes, children = Children}, ElementVarID

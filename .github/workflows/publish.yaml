@@ -26,10 +26,10 @@ jobs:
           cp _build/default/lib/sudoku.avm html/bin/
           # Download AtomVM & libs
           cd html/bin
-          wget https://github.com/pguyot/AtomVM/releases/download/246358e/AtomVM.js
-          wget https://github.com/pguyot/AtomVM/releases/download/246358e/AtomVM.worker.js
-          wget https://github.com/pguyot/AtomVM/releases/download/246358e/AtomVM.wasm
-          wget https://github.com/pguyot/AtomVM/releases/download/246358e/atomvmlib.avm
+          wget https://github.com/pguyot/AtomVM/releases/download/603ca1e0/AtomVM.js
+          wget https://github.com/pguyot/AtomVM/releases/download/603ca1e0/AtomVM.worker.js
+          wget https://github.com/pguyot/AtomVM/releases/download/603ca1e0/AtomVM.wasm
+          wget https://github.com/pguyot/AtomVM/releases/download/603ca1e0/atomvmlib.avm
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:

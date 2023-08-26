@@ -1,0 +1,70 @@
+/*
+Copyright 2023 Paul Guyot <pguyot@kallisys.net>
+SPDX-License-Identifier: Apache-2.0 OR LGPL-2.1-or-later
+*/
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    font-family: sans-serif;
+}
+
+div#root {
+}
+
+div#loader {
+    margin: 10em auto;
+    width: 50%;
+}
+
+.loader-countdown {
+    font-size: 400%;
+    text-align: center;
+}
+
+.loader-caption {
+    text-align: center;
+    color: grey;
+}
+
+.late-loader-caption {
+    text-align: center;
+    color: red;
+}
+
+table.sudoku-grid {
+    border-collapse: collapse;
+    margin: 4em auto;
+}
+
+table.sudoku-grid caption {
+    caption-side: bottom;
+    text-align: right;
+    color: grey;
+    font-size: 60%;
+}
+
+table.sudoku-grid tr td {
+    border: 1px solid grey;
+    width: 2em;
+    height: 2em;
+    text-align: center;
+}
+
+table.sudoku-grid tr:nth-child(3 of tr) td {
+    border-bottom: 2px solid grey;
+}
+
+table.sudoku-grid tr:nth-child(6 of tr) td {
+    border-bottom: 2px solid grey;
+}
+
+table.sudoku-grid tr td:nth-child(3 of td) {
+    border-right: 2px solid grey;
+}
+
+table.sudoku-grid tr td:nth-child(6 of td) {
+    border-right: 2px solid grey;
+}
