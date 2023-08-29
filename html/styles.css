@@ -9,18 +9,24 @@ body {
     height: 100%;
     margin: 0;
     font-family: sans-serif;
+    font-size: 4svmin;
+    overflow: hidden;
+    position: fixed;
+}
+
+* {
+    touch-action: manipulation;
 }
 
 div#root {
 }
 
 div#loader {
-    margin: 10em auto;
-    width: 50%;
+    margin: 35vh auto;
 }
 
 .loader-countdown {
-    font-size: 400%;
+    font-size: 16svh;
     text-align: center;
 }
 
@@ -30,13 +36,22 @@ div#loader {
 }
 
 .late-loader-caption {
+    margin: 12svh auto;
     text-align: center;
     color: red;
 }
 
 table.sudoku-grid {
     border-collapse: collapse;
-    margin: 4em auto;
+    margin: 8svmin auto;
+}
+
+table.sudoku-grid thead tr th {
+    text-align: left;
+}
+
+table.sudoku-grid th button.help {
+    height: 2em;
 }
 
 table.sudoku-grid caption {
@@ -48,9 +63,21 @@ table.sudoku-grid caption {
 
 table.sudoku-grid tr td {
     border: 1px solid grey;
-    width: 2em;
-    height: 2em;
+    width: 8svmin;
+    height: 8svmin;
     text-align: center;
+}
+
+table.sudoku-grid tr td.hint {
+    font-weight: bold;
+    cursor: default;
+}
+
+table.sudoku-grid tr td.input {
+    user-select: none;
+    -webkit-user-select: none;
+    -ms-user-select: none;
+    cursor: pointer;
 }
 
 table.sudoku-grid tr:nth-child(3 of tr) td {

@@ -24,10 +24,13 @@ create_puzzle_test_() ->
     {timeout,
         120,
         ?_test(begin
-            {Hints, Puzzle} = sudoku_grid:random_puzzle(fun random_generator/1),
+            {Hints, Puzzle, Solution} = sudoku_grid:random_puzzle(fun random_generator/1),
             ?assert(Hints < 54),
             ?assertEqual(81, length(sudoku_grid:to_list(Puzzle))),
             ?assertEqual(Hints, count_hints(Puzzle)),
+            ?assertEqual(81, length(sudoku_grid:to_list(Solution))),
+            ?assertEqual(81, count_hints(Solution)),
+            sudoku_grid:is_solved(Solution),
             ok
         end)
     }.
@@ -36,9 +39,12 @@ create_proper_puzzle_test_() ->
     {timeout,
         10,
         ?_test(begin
-            Puzzle = sudoku_grid:parallel_random_puzzle(fun random_generator/1, 25, 5000),
+            {Puzzle, Solution} = sudoku_grid:parallel_random_puzzle(fun random_generator/1, 25, 5000),
             ?assertEqual(81, length(sudoku_grid:to_list(Puzzle))),
             ?assert(count_hints(Puzzle) =< 25),
+            ?assertEqual(81, length(sudoku_grid:to_list(Solution))),
+            ?assertEqual(81, count_hints(Solution)),
+            sudoku_grid:is_solved(Solution),
             ok
         end)
     }.
@@ -58,3 +64,19 @@ count_hints(Puzzle) ->
             _ -> Acc + 1
         end
     end, 0, sudoku_grid:to_list(Puzzle)).
+
+is_move_valid_test() ->
+    EmptyGrid = maps:from_list([{{X, Y}, 0} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]),
+    ?assert(sudoku_grid:is_move_valid(EmptyGrid, {1, 1}, 1)),
+    Grid1 = maps:put({1, 1}, 1, EmptyGrid),
+    ?assertNot(sudoku_grid:is_move_valid(Grid1, {1, 9}, 1)),
+    ?assertNot(sudoku_grid:is_move_valid(Grid1, {9, 1}, 1)),
+    ?assertNot(sudoku_grid:is_move_valid(Grid1, {2, 2}, 1)),
+    ok.
+
+is_solved_test() ->
+    EmptyGrid = maps:from_list([{{X, Y}, 0} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]),
+    ?assertNot(sudoku_grid:is_solved(EmptyGrid)),
+    FullYetInvalidGrid = maps:from_list([{{X, Y}, X} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)]),
+    ?assert(sudoku_grid:is_solved(FullYetInvalidGrid)),
+    ok.

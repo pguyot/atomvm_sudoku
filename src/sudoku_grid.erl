@@ -9,7 +9,9 @@
     parallel_random_puzzle/3, parallel_random_puzzle/4,
     print/1,
     get/3,
-    to_list/1
+    to_list/1,
+    is_move_valid/3,
+    is_solved/1
 ]).
 
 -type index() :: {1..9, 1..9}.
@@ -44,13 +46,14 @@ to_list(Grid) when is_map(Grid) ->
 to_list(Grid) when is_tuple(Grid) ->
     [{{X, Y}, get(X, Y, Grid)} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)].
 
--spec parallel_random_puzzle(random_generator(), pos_integer(), timeout()) -> puzzle_grid().
+-spec parallel_random_puzzle(random_generator(), pos_integer(), timeout()) ->
+    {Puzzle :: puzzle_grid(), Solution :: puzzle_grid()}.
 parallel_random_puzzle(RandomGenerator, MaxHint, Timeout) ->
     Schedulers = erlang:system_info(schedulers_online),
     parallel_random_puzzle(RandomGenerator, MaxHint, Schedulers, Timeout).
 
 -spec parallel_random_puzzle(random_generator(), pos_integer(), pos_integer(), timeout()) ->
-    puzzle_grid().
+    {Puzzle :: puzzle_grid(), Solution :: puzzle_grid()}.
 parallel_random_puzzle(RandomGenerator, MaxHint, Schedulers, Timeout) ->
     Parent = self(),
     Start = erlang:system_time(millisecond),
@@ -59,7 +62,6 @@ parallel_random_puzzle(RandomGenerator, MaxHint, Schedulers, Timeout) ->
             "BEAM" -> [];
             "ATOM" -> [{heap_growth, fibonacci}]
         end,
-    io:format("~s:~B: ~p\n", [?MODULE, ?LINE, self()]),
     Workers = [
         spawn_opt(
             fun() -> parallel_random_puzzle_worker_loop(RandomGenerator, Parent, infinity) end, [
@@ -68,22 +70,21 @@ parallel_random_puzzle(RandomGenerator, MaxHint, Schedulers, Timeout) ->
         )
      || _ <- lists:seq(1, Schedulers)
     ],
-    io:format("~s:~B: ~p\n", [?MODULE, ?LINE, self()]),
-    parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, infinity, undefined).
+    parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, infinity, undefined, undefined).
 
 parallel_random_puzzle_worker_loop(RandomGenerator, Parent, BestCandidate) ->
-    io:format("~s:~B: ~p\n", [?MODULE, ?LINE, self()]),
-    {Hints, Puzzle} = random_puzzle(RandomGenerator),
+    {Hints, Puzzle, Solution} = random_puzzle(RandomGenerator),
     if
         Hints < BestCandidate ->
-            Parent ! {self(), Hints, Puzzle},
+            Parent ! {self(), Hints, Puzzle, Solution},
             parallel_random_puzzle_worker_loop(RandomGenerator, Parent, Hints);
         true ->
             parallel_random_puzzle_worker_loop(RandomGenerator, Parent, BestCandidate)
     end.
 
-parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, BestPuzzleHints, BestPuzzleGrid) ->
-    io:format("~s:~B: ~p\n", [?MODULE, ?LINE, self()]),
+parallel_random_puzzle_loop(
+    Start, MaxHint, Workers, Timeout, BestPuzzleHints, BestPuzzleGrid, BestPuzzleSolution
+) ->
     Wait =
         case {Timeout, BestPuzzleGrid} of
             {infinity, _} -> infinity;
@@ -91,23 +92,29 @@ parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, BestPuzzleHints, B
             _ -> max(0, Timeout + Start - erlang:system_time(millisecond))
         end,
     receive
-        {_Worker, Hints, Puzzle} ->
-            io:format("Got a grid...\n"),
+        {_Worker, Hints, Puzzle, Solution} ->
             if
                 Hints =< MaxHint ->
                     stop_workers(Workers),
-                    Puzzle;
+                    {Puzzle, Solution};
                 Hints < BestPuzzleHints ->
-                    parallel_random_puzzle_loop(Start, MaxHint, Workers, Timeout, Hints, Puzzle);
+                    parallel_random_puzzle_loop(
+                        Start, MaxHint, Workers, Timeout, Hints, Puzzle, Solution
+                    );
                 true ->
                     parallel_random_puzzle_loop(
-                        Start, MaxHint, Workers, Timeout, BestPuzzleHints, BestPuzzleGrid
+                        Start,
+                        MaxHint,
+                        Workers,
+                        Timeout,
+                        BestPuzzleHints,
+                        BestPuzzleGrid,
+                        BestPuzzleSolution
                     )
             end
     after Wait ->
-        io:format("Final timeout, workers = ~p...\n", [Workers]),
         stop_workers(Workers),
-        BestPuzzleGrid
+        {BestPuzzleGrid, BestPuzzleSolution}
     end.
 
 stop_workers([]) ->
@@ -124,12 +131,14 @@ flush_solutions(Worker) ->
     after 0 -> ok
     end.
 
--spec random_puzzle(random_generator()) -> {pos_integer(), puzzle_grid()}.
+-spec random_puzzle(random_generator()) ->
+    {Hints :: pos_integer(), Puzzle :: puzzle_grid(), Solution :: puzzle_grid()}.
 random_puzzle(RandomGenerator) ->
-    Grid = random_solution(RandomGenerator),
+    SolutionGrid = random_solution(RandomGenerator),
     AllCells = [{X, Y} || X <- lists:seq(1, 9), Y <- lists:seq(1, 9)],
     ShuffledCells = shuffle(RandomGenerator, AllCells),
-    remove_values_until_multiple_solutions(Grid, ShuffledCells, []).
+    {Hints, PuzzleGrid} = remove_values_until_multiple_solutions(SolutionGrid, ShuffledCells, []),
+    {Hints, PuzzleGrid, work_to_puzzle_grid(SolutionGrid)}.
 
 -spec shuffle(random_generator(), [any()]) -> [any()].
 shuffle(RandomGenerator, List) ->
@@ -270,6 +279,21 @@ hints_to_puzzle_grid(Grid, HintCells) ->
         HintCells
     ).
 
+-spec work_to_puzzle_grid(Grid :: work_grid()) -> puzzle_grid().
+work_to_puzzle_grid(Grid) ->
+    lists:foldl(
+        fun({Position, Vals}, Map) ->
+            case Vals of
+                [Value] ->
+                    maps:put(Position, Value, Map);
+                _ ->
+                    maps:put(Position, 0, Map)
+            end
+        end,
+        maps:new(),
+        to_list(Grid)
+    ).
+
 -spec remove_cells_and_propagate(Grid :: work_grid(), HintCells :: [index()]) -> work_grid().
 remove_cells_and_propagate(Grid, HintCells) ->
     EmptyGrid = empty_work_grid(),
@@ -375,3 +399,46 @@ print(Grid) ->
         end,
         lists:seq(1, 9)
     ).
+
+%% @doc Determine if a given cell can be set to a value by checking
+%% constraints on line, column and square this value belongs to.
+-spec is_move_valid(Grid :: puzzle_grid(), Position :: index(), Value :: value()) -> boolean().
+is_move_valid(Grid, {X, Y} = Position, MoveValue) ->
+    UpdatedGrid = maps:put(Position, MoveValue, Grid),
+    {Line, Col, Square} = maps:fold(
+        fun
+            (_Position, 0, Acc) ->
+                Acc;
+            ({IX, IY}, Value, {AccLine, AccCol, AccSquare}) ->
+                NewLine =
+                    if
+                        IX =:= X -> [Value | AccLine];
+                        true -> AccLine
+                    end,
+                NewCol =
+                    if
+                        IY =:= Y -> [Value | AccCol];
+                        true -> AccCol
+                    end,
+                NewSquare =
+                    if
+                        (IX - 1) div 3 =:= (X - 1) div 3 andalso
+                            (IY - 1) div 3 =:= (Y - 1) div 3 ->
+                            [Value | AccSquare];
+                        true ->
+                            AccSquare
+                    end,
+                {NewLine, NewCol, NewSquare}
+        end,
+        {[], [], []},
+        UpdatedGrid
+    ),
+    is_set_valid(Line) andalso is_set_valid(Col) andalso is_set_valid(Square).
+
+is_set_valid(List) ->
+    lists:usort(List) =:= lists:sort(List).
+
+%% @doc Determine if a puzzle is solved
+-spec is_solved(Grid :: puzzle_grid()) -> boolean().
+is_solved(Puzzle) ->
+    maps:fold(fun(_Position, Value, Acc) -> Acc andalso Value =/= 0 end, true, Puzzle).
